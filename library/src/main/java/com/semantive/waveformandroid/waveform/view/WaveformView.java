@@ -78,7 +78,6 @@ public class WaveformView extends View {
     protected int mNumZoomLevels;
     protected int mSampleRate;
     protected int mSamplesPerFrame;
-    protected int mOffset;
     protected int mSelectionStart;
     protected int mSelectionEnd;
     protected int mPlaybackPos;
@@ -160,7 +159,6 @@ public class WaveformView extends View {
 
         mSoundFile = null;
         mLenByZoomLevel = null;
-        mOffset = 0;
         mPlaybackPos = -1;
         mSelectionStart = 0;
         mSelectionEnd = 0;
@@ -224,11 +222,6 @@ public class WaveformView extends View {
             float factor = mLenByZoomLevel[mZoomLevel] / (float) mLenByZoomLevel[mZoomLevel - 1];
             mSelectionStart *= factor;
             mSelectionEnd *= factor;
-            int offsetCenter = mOffset + (int) (getMeasuredWidth() / factor);
-            offsetCenter *= factor;
-            mOffset = offsetCenter - (int) (getMeasuredWidth() / factor);
-            if (mOffset < 0)
-                mOffset = 0;
             invalidate();
         }
     }
@@ -243,11 +236,6 @@ public class WaveformView extends View {
             float factor = mLenByZoomLevel[mZoomLevel + 1] / (float) mLenByZoomLevel[mZoomLevel];
             mSelectionStart /= factor;
             mSelectionEnd /= factor;
-            int offsetCenter = (int) (mOffset + getMeasuredWidth() / factor);
-            offsetCenter /= factor;
-            mOffset = offsetCenter - (int) (getMeasuredWidth() / factor);
-            if (mOffset < 0)
-                mOffset = 0;
             invalidate();
         }
     }
@@ -280,10 +268,9 @@ public class WaveformView extends View {
         return (int) (pixels * (1000.0 * mSamplesPerFrame) / (mSampleRate * z) + 0.5);
     }
 
-    public void setParameters(int start, int end, int offset) {
+    public void setParameters(int start, int end) {
         mSelectionStart = start;
         mSelectionEnd = end;
-        mOffset = offset;
     }
 
     public int getStart() {
@@ -292,10 +279,6 @@ public class WaveformView extends View {
 
     public int getEnd() {
         return mSelectionEnd;
-    }
-
-    public int getOffset() {
-        return mOffset;
     }
 
     public void setPlayback(int pos) {
@@ -333,7 +316,7 @@ public class WaveformView extends View {
 
         int measuredWidth = getMeasuredWidth();
         int measuredHeight = getMeasuredHeight();
-        int start = mOffset;
+        int start = 0;
         int width = mLenByZoomLevel[mZoomLevel] - start;
         int ctr = measuredHeight / 2;
 
@@ -342,8 +325,6 @@ public class WaveformView extends View {
 
         double onePixelInSecs = pixelsToSeconds(1);
         boolean onlyEveryFiveSecs = (onePixelInSecs > 1.0 / 50.0);
-        double fractionalSecs = mOffset * onePixelInSecs;
-        int integerSecs = (int) fractionalSecs;
 
         double timecodeIntervalSecs = 1.0;
 
@@ -352,22 +333,11 @@ public class WaveformView extends View {
             timecodeIntervalSecs = 5.0 * factor;
             factor++;
         }
-
-        int integerTimecode = (int) (fractionalSecs / timecodeIntervalSecs);
-
         int i = 0;
         while (i < width) {
-            fractionalSecs += onePixelInSecs;
-            int integerSecsNew = (int) fractionalSecs;
-            if (integerSecsNew != integerSecs) {
-                integerSecs = integerSecsNew;
-                if (!onlyEveryFiveSecs || 0 == (integerSecs % 5)) {
-                    canvas.drawLine(i + 1, 0, i + 1, measuredHeight, mGridPaint);
-                }
-            }
 
             // Draw waveform
-            drawWaveform(canvas, i, start, measuredHeight, ctr, selectWaveformPaint(i, start, fractionalSecs));
+            drawWaveform(canvas, i, start, measuredHeight, ctr, selectWaveformPaint(i, start, 0));
 
             i++;
         }
@@ -380,39 +350,13 @@ public class WaveformView extends View {
 
         // Draw borders
         canvas.drawLine(
-                mSelectionStart - mOffset + 0.5f, 30,
-                mSelectionStart - mOffset + 0.5f, measuredHeight,
+                mSelectionStart + 0.5f, 30,
+                mSelectionStart + 0.5f, measuredHeight,
                 mBorderLinePaint);
         canvas.drawLine(
-                mSelectionEnd - mOffset + 0.5f, 0,
-                mSelectionEnd - mOffset + 0.5f, measuredHeight - 30,
+                mSelectionEnd + 0.5f, 0,
+                mSelectionEnd + 0.5f, measuredHeight - 30,
                 mBorderLinePaint);
-
-        // Draw grid
-        fractionalSecs = mOffset * onePixelInSecs;
-        i = 0;
-        while (i < width) {
-            i++;
-            fractionalSecs += onePixelInSecs;
-            int integerSecs2 = (int) fractionalSecs;
-            int integerTimecodeNew = (int) (fractionalSecs / timecodeIntervalSecs);
-            if (integerTimecodeNew != integerTimecode) {
-                integerTimecode = integerTimecodeNew;
-
-                // Turn, e.g. 67 seconds into "1:07"
-                String timecodeMinutes = "" + (integerSecs2 / 60);
-                String timecodeSeconds = "" + (integerSecs2 % 60);
-                if ((integerSecs2 % 60) < 10) {
-                    timecodeSeconds = "0" + timecodeSeconds;
-                }
-                String timecodeStr = timecodeMinutes + ":" + timecodeSeconds;
-                float offset = (float) (0.5 * mTimecodePaint.measureText(timecodeStr));
-                canvas.drawText(timecodeStr,
-                        i - offset,
-                        (int) (12 * mDensity),
-                        mTimecodePaint);
-            }
-        }
 
         if (mListener != null) {
             mListener.waveformDraw();

@@ -25,3 +25,9 @@ proguard/
 
 # Log Files
 *.log
+
+# IDE configuration files
+.idea/
+
+app/app.iml
+library/library.iml

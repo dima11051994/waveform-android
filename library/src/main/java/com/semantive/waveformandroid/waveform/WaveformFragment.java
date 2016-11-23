@@ -59,7 +59,6 @@ public abstract class WaveformFragment extends Fragment implements WaveformView.
     protected String mFilename;
     protected WaveformView mWaveformView;
     protected ImageButton mPlayButton;
-    protected boolean mKeyDown;
     protected String mCaption = "";
     protected int mWidth;
     protected int mMaxPos;
@@ -69,29 +68,20 @@ public abstract class WaveformFragment extends Fragment implements WaveformView.
     protected int mLastDisplayedEndPos;
     protected int mOffset;
     protected int mOffsetGoal;
-    protected int mFlingVelocity;
     protected int mPlayStartMsec;
     protected int mPlayStartOffset;
     protected int mPlayEndMsec;
     protected Handler mHandler;
     protected boolean mIsPlaying;
     protected MediaPlayer mPlayer;
-    protected boolean mTouchDragging;
-    protected float mTouchStart;
-    protected int mTouchInitialOffset;
-    protected long mWaveformTouchStartMsec;
     protected float mDensity;
+    protected boolean okLoad = false;
 
     @Override
     public View onCreateView(LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
         super.onCreateView(inflater, container, savedInstanceState);
         View view = inflater.inflate(R.layout.fragment_waveform, container, false);
         loadGui(view);
-        if (mSoundFile == null) {
-            loadFromFile();
-        } else {
-            mHandler.post(() -> finishOpeningSoundFile());
-        }
         return view;
     }
 
@@ -103,9 +93,8 @@ public abstract class WaveformFragment extends Fragment implements WaveformView.
         mPlayer = null;
         mIsPlaying = false;
 
-        mFilename = getFileName();
+        mFilename = null;
         mSoundFile = null;
-        mKeyDown = false;
 
         mHandler = new Handler();
     }
@@ -133,74 +122,17 @@ public abstract class WaveformFragment extends Fragment implements WaveformView.
      */
     public void waveformDraw() {
         mWidth = mWaveformView.getMeasuredWidth();
-        if (mOffsetGoal != mOffset && !mKeyDown)
+        if (mOffsetGoal != mOffset)
             updateDisplay();
         else if (mIsPlaying) {
             updateDisplay();
-        } else if (mFlingVelocity != 0) {
-            updateDisplay();
         }
     }
 
-    public void waveformTouchStart(float x) {
-        mTouchDragging = true;
-        mTouchStart = x;
-        mTouchInitialOffset = mOffset;
-        mFlingVelocity = 0;
-        mWaveformTouchStartMsec = System.currentTimeMillis();
-    }
-
-    public void waveformTouchMove(float x) {
-        mOffset = trap((int) (mTouchInitialOffset + (mTouchStart - x)));
-        updateDisplay();
-    }
-
-    public void waveformTouchEnd() {
-        mTouchDragging = false;
-        mOffsetGoal = mOffset;
-
-        long elapsedMsec = System.currentTimeMillis() - mWaveformTouchStartMsec;
-        if (elapsedMsec < 300) {
-            if (mIsPlaying) {
-                int seekMsec = mWaveformView.pixelsToMillisecs((int) (mTouchStart + mOffset));
-                if (seekMsec >= mPlayStartMsec && seekMsec < mPlayEndMsec) {
-                    mPlayer.seekTo(seekMsec - mPlayStartOffset);
-                } else {
-                    handlePause();
-                }
-            } else {
-                onPlay((int) (mTouchStart + mOffset));
-            }
+    public void waveformClick() {
+        if (mIsPlaying) {
+            handlePause();
         }
-    }
-
-    public void waveformFling(float vx) {
-        mTouchDragging = false;
-        mOffsetGoal = mOffset;
-        mFlingVelocity = (int) (-vx);
-        updateDisplay();
-    }
-
-    public void waveformZoomIn() {
-        mWaveformView.zoomIn();
-        mStartPos = mWaveformView.getStart();
-        mEndPos = mWaveformView.getEnd();
-        mMaxPos = mWaveformView.maxPos();
-        mOffset = 0;
-        mOffsetGoal = mOffset;
-        enableZoomButtons();
-        updateDisplay();
-    }
-
-    public void waveformZoomOut() {
-        mWaveformView.zoomOut();
-        mStartPos = mWaveformView.getStart();
-        mEndPos = mWaveformView.getEnd();
-        mMaxPos = mWaveformView.maxPos();
-        mOffset = 0;
-        mOffsetGoal = mOffset;
-        enableZoomButtons();
-        updateDisplay();
     }
 
     //
@@ -220,6 +152,8 @@ public abstract class WaveformFragment extends Fragment implements WaveformView.
         mWaveformView = (WaveformView) view.findViewById(R.id.waveform);
         mWaveformView.setListener(this);
         mWaveformView.setSegments(getSegments());
+        mWaveformView.setPlaybackColor(getPlaybackColor());
+        mWaveformView.setSoundWaveColor(getSoundWaveColor());
 
         mMaxPos = 0;
         mLastDisplayedStartPos = -1;
@@ -295,11 +229,8 @@ public abstract class WaveformFragment extends Fragment implements WaveformView.
         mLastDisplayedStartPos = -1;
         mLastDisplayedEndPos = -1;
 
-        mTouchDragging = false;
-
         mOffset = 0;
         mOffsetGoal = 0;
-        mFlingVelocity = 0;
         resetPositions();
 
         mCaption = mSoundFile.getFiletype() + ", " +
@@ -308,6 +239,7 @@ public abstract class WaveformFragment extends Fragment implements WaveformView.
                 formatTime(mMaxPos) + " " + getResources().getString(R.string.time_seconds);
         mProgressDialog.dismiss();
         updateDisplay();
+        onPlay(mStartPos);
     }
 
     protected synchronized void updateDisplay() {
@@ -321,58 +253,29 @@ public abstract class WaveformFragment extends Fragment implements WaveformView.
             }
         }
 
-        if (!mTouchDragging) {
-            int offsetDelta;
+        int offsetDelta = mOffsetGoal - mOffset;
 
-            if (mFlingVelocity != 0) {
+        if (offsetDelta > 10)
+            offsetDelta = offsetDelta / 10;
+        else if (offsetDelta > 0)
+            offsetDelta = 1;
+        else if (offsetDelta < -10)
+            offsetDelta = offsetDelta / 10;
+        else if (offsetDelta < 0)
+            offsetDelta = -1;
+        else
+            offsetDelta = 0;
 
-                offsetDelta = mFlingVelocity / 30;
-                if (mFlingVelocity > 80) {
-                    mFlingVelocity -= 80;
-                } else if (mFlingVelocity < -80) {
-                    mFlingVelocity += 80;
-                } else {
-                    mFlingVelocity = 0;
-                }
+        mOffset += offsetDelta;
 
-                mOffset += offsetDelta;
-
-                if (mOffset + mWidth / 2 > mMaxPos) {
-                    mOffset = mMaxPos - mWidth / 2;
-                    mFlingVelocity = 0;
-                }
-                if (mOffset < 0) {
-                    mOffset = 0;
-                    mFlingVelocity = 0;
-                }
-                mOffsetGoal = mOffset;
-            } else {
-                offsetDelta = mOffsetGoal - mOffset;
-
-                if (offsetDelta > 10)
-                    offsetDelta = offsetDelta / 10;
-                else if (offsetDelta > 0)
-                    offsetDelta = 1;
-                else if (offsetDelta < -10)
-                    offsetDelta = offsetDelta / 10;
-                else if (offsetDelta < 0)
-                    offsetDelta = -1;
-                else
-                    offsetDelta = 0;
-
-                mOffset += offsetDelta;
-            }
-        }
-
-        mWaveformView.setParameters(mStartPos, mEndPos);
         mWaveformView.invalidate();
     }
 
     protected void enableDisableButtons() {
         if (mIsPlaying) {
-            mPlayButton.setImageResource(android.R.drawable.ic_media_pause);
-            mPlayButton.setContentDescription(getResources().getText(R.string.stop));
+            mPlayButton.setVisibility(View.GONE);
         } else {
+            mPlayButton.setVisibility(View.VISIBLE);
             mPlayButton.setImageResource(R.drawable.play);
             mPlayButton.setContentDescription(getResources().getText(R.string.play));
         }
@@ -383,40 +286,7 @@ public abstract class WaveformFragment extends Fragment implements WaveformView.
         mEndPos = mMaxPos;
     }
 
-    protected int trap(int pos) {
-        if (pos < 0)
-            return 0;
-        if (pos > mMaxPos)
-            return mMaxPos;
-        return pos;
-    }
-
-    protected void setOffsetGoalStart() {
-        setOffsetGoal(mStartPos - mWidth / 2);
-    }
-
-    protected void setOffsetGoalStartNoUpdate() {
-        setOffsetGoalNoUpdate(mStartPos - mWidth / 2);
-    }
-
-    protected void setOffsetGoalEnd() {
-        setOffsetGoal(mEndPos - mWidth / 2);
-    }
-
-    protected void setOffsetGoalEndNoUpdate() {
-        setOffsetGoalNoUpdate(mEndPos - mWidth / 2);
-    }
-
-    protected void setOffsetGoal(int offset) {
-        setOffsetGoalNoUpdate(offset);
-        updateDisplay();
-    }
-
     protected void setOffsetGoalNoUpdate(int offset) {
-        if (mTouchDragging) {
-            return;
-        }
-
         mOffsetGoal = offset;
         if (mOffsetGoal + mWidth / 2 > mMaxPos)
             mOffsetGoal = mMaxPos - mWidth / 2;
@@ -454,7 +324,6 @@ public abstract class WaveformFragment extends Fragment implements WaveformView.
         if (mPlayer != null && mPlayer.isPlaying()) {
             mPlayer.pause();
         }
-        mWaveformView.setPlayback(-1);
         mIsPlaying = false;
         enableDisableButtons();
     }
@@ -465,9 +334,10 @@ public abstract class WaveformFragment extends Fragment implements WaveformView.
             return;
         }
 
-        if (mPlayer == null) {
-            // Not initialized yet
-            return;
+        //sound file is not loaded yet
+        if (mSoundFile == null) {
+            mFilename = getFileName();
+            loadFromFile();
         }
 
         try {
@@ -507,18 +377,12 @@ public abstract class WaveformFragment extends Fragment implements WaveformView.
             mPlayer.setOnCompletionListener((MediaPlayer mediaPlayer) -> handlePause());
             mIsPlaying = true;
 
-            if (mPlayStartOffset == 0) {
-                mPlayer.seekTo(mPlayStartMsec);
-            }
             mPlayer.start();
             updateDisplay();
             enableDisableButtons();
         } catch (Exception e) {
             Log.e(TAG, "Exception while playing file", e);
         }
-    }
-
-    protected void enableZoomButtons() {
     }
 
     protected OnClickListener mPlayListener = new OnClickListener() {
@@ -531,5 +395,19 @@ public abstract class WaveformFragment extends Fragment implements WaveformView.
 
     protected List<Segment> getSegments() {
         return null;
+    }
+
+    /**
+     * Get color of playback line. Override it for customizing
+     */
+    protected int getPlaybackColor() {
+        return getResources().getColor(R.color.playback_indicator);
+    }
+
+    /**
+     * Get color of sound wave. Override it for customizing
+     */
+    public int getSoundWaveColor() {
+        return getResources().getColor(R.color.waveform_selected);
     }
 }

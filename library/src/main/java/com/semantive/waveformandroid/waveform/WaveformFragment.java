@@ -407,7 +407,7 @@ public abstract class WaveformFragment extends Fragment implements WaveformView.
     /**
      * Get color of sound wave. Override it for customizing
      */
-    public int getSoundWaveColor() {
+    protected int getSoundWaveColor() {
         return getResources().getColor(R.color.waveform_selected);
     }
 }

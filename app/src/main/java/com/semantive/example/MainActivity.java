@@ -26,7 +26,7 @@ public class MainActivity extends AppCompatActivity {
          */
         @Override
         protected String getFileName() {
-            return "/storage/sdcard1/working/fob-c.mp3";
+            return "your path here";
         }
     }
 }

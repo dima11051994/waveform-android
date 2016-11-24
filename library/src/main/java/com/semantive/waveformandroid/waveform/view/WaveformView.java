@@ -21,10 +21,9 @@ import android.graphics.Canvas;
 import android.graphics.DashPathEffect;
 import android.graphics.Paint;
 import android.util.AttributeSet;
-import android.view.GestureDetector;
 import android.view.MotionEvent;
-import android.view.ScaleGestureDetector;
 import android.view.View;
+
 import com.semantive.waveformandroid.R;
 import com.semantive.waveformandroid.waveform.Segment;
 import com.semantive.waveformandroid.waveform.soundfile.CheapSoundFile;
@@ -45,7 +44,7 @@ import java.util.TreeMap;
  * <p/>
  * WaveformView doesn't actually handle selection, but it will just display
  * the selected part of the waveform in a different color.
- *
+ * <p>
  * Modified by Anna Stępień <anna.stepien@semantive.com>
  */
 public class WaveformView extends View {
@@ -53,40 +52,25 @@ public class WaveformView extends View {
     public static final String TAG = "WaveformView";
 
     public interface WaveformListener {
-        public void waveformTouchStart(float x);
-        public void waveformTouchMove(float x);
-        public void waveformTouchEnd();
-        public void waveformFling(float x);
+        public void waveformClick();
+
         public void waveformDraw();
-        public void waveformZoomIn();
-        public void waveformZoomOut();
     }
 
     // Colors
     protected Paint mGridPaint;
-    protected Paint mSelectedLinePaint;
-    protected Paint mUnselectedLinePaint;
-    protected Paint mUnselectedBkgndLinePaint;
+    protected Paint mSoundWavePaint;
     protected Paint mBorderLinePaint;
     protected Paint mPlaybackLinePaint;
-    protected Paint mTimecodePaint;
 
     protected CheapSoundFile mSoundFile;
-    protected int[] mLenByZoomLevel;
-    protected float[] mZoomFactorByZoomLevel;
-    protected int mZoomLevel;
-    protected int mNumZoomLevels;
+    protected int mLength;
+    protected float mZoomFactor;
     protected int mSampleRate;
     protected int mSamplesPerFrame;
-    protected int mOffset;
-    protected int mSelectionStart;
-    protected int mSelectionEnd;
     protected int mPlaybackPos;
     protected float mDensity;
-    protected float mInitialScaleSpan;
     protected WaveformListener mListener;
-    protected GestureDetector mGestureDetector;
-    protected ScaleGestureDetector mScaleGestureDetector;
     protected boolean mInitialized;
 
     protected float range;
@@ -105,15 +89,9 @@ public class WaveformView extends View {
         mGridPaint = new Paint();
         mGridPaint.setAntiAlias(false);
         mGridPaint.setColor(getResources().getColor(R.color.grid_line));
-        mSelectedLinePaint = new Paint();
-        mSelectedLinePaint.setAntiAlias(false);
-        mSelectedLinePaint.setColor(getResources().getColor(R.color.waveform_selected));
-        mUnselectedLinePaint = new Paint();
-        mUnselectedLinePaint.setAntiAlias(false);
-        mUnselectedLinePaint.setColor(getResources().getColor(R.color.waveform_unselected));
-        mUnselectedBkgndLinePaint = new Paint();
-        mUnselectedBkgndLinePaint.setAntiAlias(false);
-        mUnselectedBkgndLinePaint.setColor(getResources().getColor(R.color.waveform_unselected_bkgnd_overlay));
+        mSoundWavePaint = new Paint();
+        mSoundWavePaint.setAntiAlias(false);
+        mSoundWavePaint.setColor(getResources().getColor(R.color.waveform_selected));
         mBorderLinePaint = new Paint();
         mBorderLinePaint.setAntiAlias(true);
         mBorderLinePaint.setStrokeWidth(1.5f);
@@ -122,48 +100,9 @@ public class WaveformView extends View {
         mPlaybackLinePaint = new Paint();
         mPlaybackLinePaint.setAntiAlias(false);
         mPlaybackLinePaint.setColor(getResources().getColor(R.color.playback_indicator));
-        mTimecodePaint = new Paint();
-        mTimecodePaint.setTextSize(12);
-        mTimecodePaint.setAntiAlias(true);
-        mTimecodePaint.setColor(getResources().getColor(R.color.timecode));
-
-        mGestureDetector = new GestureDetector(
-                context,
-                new GestureDetector.SimpleOnGestureListener() {
-                    public boolean onFling(
-                            MotionEvent e1, MotionEvent e2, float vx, float vy) {
-                        mListener.waveformFling(vx);
-                        return true;
-                    }
-                });
-
-        mScaleGestureDetector = new ScaleGestureDetector(
-                context,
-                new ScaleGestureDetector.SimpleOnScaleGestureListener() {
-                    public boolean onScaleBegin(ScaleGestureDetector d) {
-                        mInitialScaleSpan = Math.abs(d.getCurrentSpanX());
-                        return true;
-                    }
-                    public boolean onScale(ScaleGestureDetector d) {
-                        float scale = Math.abs(d.getCurrentSpanX());
-                        if (scale - mInitialScaleSpan > 40) {
-                            mListener.waveformZoomIn();
-                            mInitialScaleSpan = scale;
-                        }
-                        if (scale - mInitialScaleSpan < -40) {
-                            mListener.waveformZoomOut();
-                            mInitialScaleSpan = scale;
-                        }
-                        return true;
-                    }
-                });
 
         mSoundFile = null;
-        mLenByZoomLevel = null;
-        mOffset = 0;
         mPlaybackPos = -1;
-        mSelectionStart = 0;
-        mSelectionEnd = 0;
         mDensity = 1.0f;
         mInitialized = false;
         segmentsMap = new TreeMap<>();
@@ -172,20 +111,9 @@ public class WaveformView extends View {
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        mScaleGestureDetector.onTouchEvent(event);
-        if (mGestureDetector.onTouchEvent(event)) {
-            return true;
-        }
-
         switch (event.getAction()) {
-            case MotionEvent.ACTION_DOWN:
-                mListener.waveformTouchStart(event.getX());
-                break;
-            case MotionEvent.ACTION_MOVE:
-                mListener.waveformTouchMove(event.getX());
-                break;
             case MotionEvent.ACTION_UP:
-                mListener.waveformTouchEnd();
+                mListener.waveformClick();
                 break;
         }
         return true;
@@ -206,54 +134,8 @@ public class WaveformView extends View {
         return mInitialized;
     }
 
-    public int getZoomLevel() {
-        return mZoomLevel;
-    }
-
-    public void setZoomLevel(int zoomLevel) {
-        mZoomLevel = zoomLevel;
-    }
-
-    public boolean canZoomIn() {
-        return (mZoomLevel < mNumZoomLevels - 1);
-    }
-
-    public void zoomIn() {
-        if (canZoomIn()) {
-            mZoomLevel++;
-            float factor = mLenByZoomLevel[mZoomLevel] / (float) mLenByZoomLevel[mZoomLevel - 1];
-            mSelectionStart *= factor;
-            mSelectionEnd *= factor;
-            int offsetCenter = mOffset + (int) (getMeasuredWidth() / factor);
-            offsetCenter *= factor;
-            mOffset = offsetCenter - (int) (getMeasuredWidth() / factor);
-            if (mOffset < 0)
-                mOffset = 0;
-            invalidate();
-        }
-    }
-
-    public boolean canZoomOut() {
-        return (mZoomLevel > 0);
-    }
-
-    public void zoomOut() {
-        if (canZoomOut()) {
-            mZoomLevel--;
-            float factor = mLenByZoomLevel[mZoomLevel + 1] / (float) mLenByZoomLevel[mZoomLevel];
-            mSelectionStart /= factor;
-            mSelectionEnd /= factor;
-            int offsetCenter = (int) (mOffset + getMeasuredWidth() / factor);
-            offsetCenter /= factor;
-            mOffset = offsetCenter - (int) (getMeasuredWidth() / factor);
-            if (mOffset < 0)
-                mOffset = 0;
-            invalidate();
-        }
-    }
-
     public int maxPos() {
-        return mLenByZoomLevel[mZoomLevel];
+        return mLength;
     }
 
     public int secondsToFrames(double seconds) {
@@ -261,41 +143,23 @@ public class WaveformView extends View {
     }
 
     public int secondsToPixels(double seconds) {
-        double z = mZoomFactorByZoomLevel[mZoomLevel];
+        double z = mZoomFactor;
         return (int) (z * seconds * mSampleRate / mSamplesPerFrame + 0.5);
     }
 
     public double pixelsToSeconds(int pixels) {
-        double z = mZoomFactorByZoomLevel[mZoomLevel];
+        double z = mZoomFactor;
         return (pixels * (double) mSamplesPerFrame / (mSampleRate * z));
     }
 
     public int millisecsToPixels(int msecs) {
-        double z = mZoomFactorByZoomLevel[mZoomLevel];
+        double z = mZoomFactor;
         return (int) ((msecs * 1.0 * mSampleRate * z) / (1000.0 * mSamplesPerFrame) + 0.5);
     }
 
     public int pixelsToMillisecs(int pixels) {
-        double z = mZoomFactorByZoomLevel[mZoomLevel];
+        double z = mZoomFactor;
         return (int) (pixels * (1000.0 * mSamplesPerFrame) / (mSampleRate * z) + 0.5);
-    }
-
-    public void setParameters(int start, int end, int offset) {
-        mSelectionStart = start;
-        mSelectionEnd = end;
-        mOffset = offset;
-    }
-
-    public int getStart() {
-        return mSelectionStart;
-    }
-
-    public int getEnd() {
-        return mSelectionEnd;
-    }
-
-    public int getOffset() {
-        return mOffset;
     }
 
     public void setPlayback(int pos) {
@@ -314,10 +178,26 @@ public class WaveformView extends View {
         }
     }
 
+    /**
+     * Set color of playback line
+     *
+     * @param color color from resources
+     */
+    public void setPlaybackColor(int color) {
+        mPlaybackLinePaint.setColor(color);
+    }
+
+    /**
+     * Set color of sound wave
+     *
+     * @param color color from resources
+     */
+    public void setSoundWaveColor(int color) {
+        mSoundWavePaint.setColor(color);
+    }
+
     public void recomputeHeights(float density) {
         mDensity = density;
-        mTimecodePaint.setTextSize((int) (12 * density));
-
         invalidate();
     }
 
@@ -333,17 +213,14 @@ public class WaveformView extends View {
 
         int measuredWidth = getMeasuredWidth();
         int measuredHeight = getMeasuredHeight();
-        int start = mOffset;
-        int width = mLenByZoomLevel[mZoomLevel] - start;
+        int start = 0;
+        int width = mLength - start;
         int ctr = measuredHeight / 2;
 
         if (width > measuredWidth)
             width = measuredWidth;
 
         double onePixelInSecs = pixelsToSeconds(1);
-        boolean onlyEveryFiveSecs = (onePixelInSecs > 1.0 / 50.0);
-        double fractionalSecs = mOffset * onePixelInSecs;
-        int integerSecs = (int) fractionalSecs;
 
         double timecodeIntervalSecs = 1.0;
 
@@ -352,67 +229,24 @@ public class WaveformView extends View {
             timecodeIntervalSecs = 5.0 * factor;
             factor++;
         }
-
-        int integerTimecode = (int) (fractionalSecs / timecodeIntervalSecs);
-
         int i = 0;
         while (i < width) {
-            fractionalSecs += onePixelInSecs;
-            int integerSecsNew = (int) fractionalSecs;
-            if (integerSecsNew != integerSecs) {
-                integerSecs = integerSecsNew;
-                if (!onlyEveryFiveSecs || 0 == (integerSecs % 5)) {
-                    canvas.drawLine(i + 1, 0, i + 1, measuredHeight, mGridPaint);
-                }
-            }
 
             // Draw waveform
-            drawWaveform(canvas, i, start, measuredHeight, ctr, selectWaveformPaint(i, start, fractionalSecs));
+            drawWaveform(canvas, i, start, measuredHeight, ctr, selectWaveformPaint(0));
 
             i++;
-        }
-
-        // If we can see the right edge of the waveform, draw the
-        // non-waveform area to the right as unselected
-        for (i = width; i < measuredWidth; i++) {
-            drawWaveformLine(canvas, i, 0, measuredHeight, mUnselectedBkgndLinePaint);
         }
 
         // Draw borders
         canvas.drawLine(
-                mSelectionStart - mOffset + 0.5f, 30,
-                mSelectionStart - mOffset + 0.5f, measuredHeight,
+                0.5f, 30,
+                0.5f, measuredHeight,
                 mBorderLinePaint);
         canvas.drawLine(
-                mSelectionEnd - mOffset + 0.5f, 0,
-                mSelectionEnd - mOffset + 0.5f, measuredHeight - 30,
+                0.5f, 0,
+                0.5f, measuredHeight - 30,
                 mBorderLinePaint);
-
-        // Draw grid
-        fractionalSecs = mOffset * onePixelInSecs;
-        i = 0;
-        while (i < width) {
-            i++;
-            fractionalSecs += onePixelInSecs;
-            int integerSecs2 = (int) fractionalSecs;
-            int integerTimecodeNew = (int) (fractionalSecs / timecodeIntervalSecs);
-            if (integerTimecodeNew != integerTimecode) {
-                integerTimecode = integerTimecodeNew;
-
-                // Turn, e.g. 67 seconds into "1:07"
-                String timecodeMinutes = "" + (integerSecs2 / 60);
-                String timecodeSeconds = "" + (integerSecs2 % 60);
-                if ((integerSecs2 % 60) < 10) {
-                    timecodeSeconds = "0" + timecodeSeconds;
-                }
-                String timecodeStr = timecodeMinutes + ":" + timecodeSeconds;
-                float offset = (float) (0.5 * mTimecodePaint.measureText(timecodeStr));
-                canvas.drawText(timecodeStr,
-                        i - offset,
-                        (int) (12 * mDensity),
-                        mTimecodePaint);
-            }
-        }
 
         if (mListener != null) {
             mListener.waveformDraw();
@@ -420,12 +254,7 @@ public class WaveformView extends View {
     }
 
     protected void drawWaveform(final Canvas canvas, final int i, final int start, final int measuredHeight, final int ctr, final Paint paint) {
-        if (i + start < mSelectionStart || i + start >= mSelectionEnd) {
-            drawWaveformLine(canvas, i, 0, measuredHeight,
-                    mUnselectedBkgndLinePaint);
-        }
-
-        int h = (int) (getScaledHeight(mZoomFactorByZoomLevel[mZoomLevel], start + i) * getMeasuredHeight() / 2);
+        int h = (int) (getScaledHeight(mZoomFactor, start + i) * getMeasuredHeight() / 2);
         drawWaveformLine(
                 canvas, i,
                 ctr - h,
@@ -437,13 +266,8 @@ public class WaveformView extends View {
         }
     }
 
-    protected Paint selectWaveformPaint(final int i, final int start, final double fractionalSecs) {
-        Paint paint;
-        if (i + start >= mSelectionStart && i + start < mSelectionEnd) {
-            paint = mSelectedLinePaint;
-        } else {
-            paint = mUnselectedLinePaint;
-        }
+    protected Paint selectWaveformPaint(final double fractionalSecs) {
+        Paint paint = mSoundWavePaint;
 
         if (segmentsMap != null && !segmentsMap.isEmpty()) {
             if (nextSegment == null) {
@@ -471,22 +295,34 @@ public class WaveformView extends View {
         return paint;
     }
 
-    protected float getGain(int i, int numFrames, int[] frameGains) {
-        int x = Math.min(i, numFrames - 1);
-        if (numFrames < 2) {
+    /**
+     * Return gain by given index
+     * @param i index of gain in array, may be non-integer number
+     * @param numFrames number of frames(frameGains length)
+     * @param frameGains array of gains
+     * @return gain
+     */
+    protected float getGain(float i, int numFrames, int[] frameGains) {
+        //if i is integer number, then return value from array
+        if (i % 1 == 0) {
+            //if i is greater then frames count, get last frame value
+            int x = Math.min(Math.round(i), numFrames - 1);
             return frameGains[x];
-        } else {
-            if (x == 0) {
-                return (frameGains[0] / 2.0f) + (frameGains[1] / 2.0f);
-            } else if (x == numFrames - 1) {
-                return (frameGains[numFrames - 2] / 2.0f) + (frameGains[numFrames - 1] / 2.0f);
-            } else {
-                return (frameGains[x - 1] / 3.0f) + (frameGains[x] / 3.0f) + (frameGains[x + 1] / 3.0f);
-            }
         }
+        //if i < 0 then get value of first frame with coefficient |i|
+        if (i < 0) {
+            return frameGains[0] * Math.abs(i);
+        }
+        //if i is greater then frames count, get last frame value
+        if (i > numFrames - 1) {
+            return frameGains[numFrames - 1];
+        }
+        //get interpolated value between two frames
+        int x = Math.round(i);
+        return frameGains[x] + (frameGains[x + 1] - frameGains[x]) * (i - x);
     }
 
-    protected float getHeight(int i, int numFrames, int[] frameGains, float scaleFactor, float minGain, float range) {
+    protected float getHeight(float i, int numFrames, int[] frameGains, float scaleFactor, float minGain, float range) {
         float value = (getGain(i, numFrames, frameGains) * scaleFactor - minGain) / range;
         if (value < 0.0)
             value = 0.0f;
@@ -533,102 +369,29 @@ public class WaveformView extends View {
         // Re-calibrate the min to be 5%
         minGain = 0;
         int sum = 0;
-        while (minGain < 255 && sum < numFrames / 20) {
+        while (minGain < 255 && sum < numFrames * 1.0f / 20) {
             sum += gainHist[(int) minGain];
             minGain++;
         }
 
         // Re-calibrate the max to be 99%
         sum = 0;
-        while (maxGain > 2 && sum < numFrames / 100) {
+        while (maxGain > 2 && sum < numFrames * 1.0f / 100) {
             sum += gainHist[(int) maxGain];
             maxGain--;
         }
 
         range = maxGain - minGain;
 
-        mNumZoomLevels = 4;
-        mLenByZoomLevel = new int[4];
-        mZoomFactorByZoomLevel = new float[4];
-
         float ratio = getMeasuredWidth() / (float) numFrames;
-
-        if (ratio < 1) {
-            mLenByZoomLevel[0] = Math.round(numFrames * ratio);
-            mZoomFactorByZoomLevel[0] = ratio;
-
-            mLenByZoomLevel[1] = numFrames;
-            mZoomFactorByZoomLevel[1] = 1.0f;
-
-            mLenByZoomLevel[2] = numFrames * 2;
-            mZoomFactorByZoomLevel[2] = 2.0f;
-
-            mLenByZoomLevel[3] = numFrames * 3;
-            mZoomFactorByZoomLevel[3] = 3.0f;
-
-            mZoomLevel = 0;
-        } else {
-            mLenByZoomLevel[0] = numFrames;
-            mZoomFactorByZoomLevel[0] = 1.0f;
-
-            mLenByZoomLevel[1] = numFrames * 2;
-            mZoomFactorByZoomLevel[1] = 2f;
-
-            mLenByZoomLevel[2] = numFrames * 3;
-            mZoomFactorByZoomLevel[2] = 3.0f;
-
-            mLenByZoomLevel[3] = numFrames * 4;
-            mZoomFactorByZoomLevel[3] = 4.0f;
-
-            mZoomLevel = 0;
-            for (int i = 0; i < 4; i++) {
-                if (mLenByZoomLevel[mZoomLevel] - getMeasuredWidth() > 0) {
-                    break;
-                } else {
-                    mZoomLevel = i;
-                }
-            }
-        }
-
+        mLength = Math.round(numFrames * ratio);
+        mZoomFactor = ratio;
         mInitialized = true;
     }
 
-    protected float getZoomedInHeight(float zoomLevel, int i) {
-        int f = (int) zoomLevel;
-        if (i == 0) {
-            return 0.5f * getHeight(0, mSoundFile.getNumFrames(), mSoundFile.getFrameGains(), scaleFactor, minGain, range);
-        }
-        if (i == 1) {
-            return getHeight(0, mSoundFile.getNumFrames(), mSoundFile.getFrameGains(), scaleFactor, minGain, range);
-        }
-        if (i % f == 0) {
-            float x1 = getHeight(i / f - 1, mSoundFile.getNumFrames(), mSoundFile.getFrameGains(), scaleFactor, minGain, range);
-            float x2 = getHeight(i / f, mSoundFile.getNumFrames(), mSoundFile.getFrameGains(), scaleFactor, minGain, range);
-            return 0.5f * (x1 + x2);
-        } else if ((i - 1) % f == 0) {
-            return getHeight((i - 1) / f, mSoundFile.getNumFrames(), mSoundFile.getFrameGains(), scaleFactor, minGain, range);
-        }
-        return 0;
-    }
-
-    protected float getZoomedOutHeight(float zoomLevel, int i) {
-        int f = (int) (i / zoomLevel);
-        float x1 = getHeight(f, mSoundFile.getNumFrames(), mSoundFile.getFrameGains(), scaleFactor, minGain, range);
-        float x2 = getHeight(f + 1, mSoundFile.getNumFrames(), mSoundFile.getFrameGains(), scaleFactor, minGain, range);
-        return 0.5f * (x1 + x2);
-    }
-
-    protected float getNormalHeight(int i) {
-        return getHeight(i, mSoundFile.getNumFrames(), mSoundFile.getFrameGains(), scaleFactor, minGain, range);
-    }
-
     protected float getScaledHeight(float zoomLevel, int i) {
-        if (zoomLevel == 1.0) {
-            return getNormalHeight(i);
-        } else if (zoomLevel < 1.0) {
-            return getZoomedOutHeight(zoomLevel, i);
-        }
-        return getZoomedInHeight(zoomLevel, i);
+        return getHeight((i + 1) / zoomLevel - 1, mSoundFile.getNumFrames(),
+                mSoundFile.getFrameGains(), scaleFactor, minGain, range);
     }
 }
 

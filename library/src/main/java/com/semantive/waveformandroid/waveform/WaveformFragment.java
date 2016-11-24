@@ -8,20 +8,16 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.support.annotation.Nullable;
 import android.support.v4.app.Fragment;
-import android.text.Editable;
-import android.text.TextWatcher;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.view.ViewGroup;
-import android.widget.AbsoluteLayout;
 import android.widget.ImageButton;
-import android.widget.TextView;
+
 import com.semantive.waveformandroid.R;
 import com.semantive.waveformandroid.waveform.soundfile.CheapSoundFile;
-import com.semantive.waveformandroid.waveform.view.MarkerView;
 import com.semantive.waveformandroid.waveform.view.WaveformView;
 
 import java.io.File;
@@ -47,10 +43,11 @@ import java.util.List;
 /**
  * Keeps track of the waveform display, current horizontal offset, marker handles,
  * start / end text boxes, and handles all of the buttons and controls
- *
+ * <p>
  * Modified by Anna Stępień <anna.stepien@semantive.com>
+ * Modified by Dmitry Redkovolosov <dmitry.redkovolosov@dsr-company.com>
  */
-public abstract class WaveformFragment extends Fragment implements MarkerView.MarkerListener, WaveformView.WaveformListener {
+public abstract class WaveformFragment extends Fragment implements WaveformView.WaveformListener {
 
     public static final String TAG = "WaveformFragment";
 
@@ -61,55 +58,29 @@ public abstract class WaveformFragment extends Fragment implements MarkerView.Ma
     protected File mFile;
     protected String mFilename;
     protected WaveformView mWaveformView;
-    protected MarkerView mStartMarker;
-    protected MarkerView mEndMarker;
-    protected TextView mStartText;
-    protected TextView mEndText;
-    protected TextView mInfo;
     protected ImageButton mPlayButton;
-    protected ImageButton mRewindButton;
-    protected ImageButton mFfwdButton;
-    protected boolean mKeyDown;
     protected String mCaption = "";
     protected int mWidth;
     protected int mMaxPos;
     protected int mStartPos;
     protected int mEndPos;
-    protected boolean mStartVisible;
-    protected boolean mEndVisible;
     protected int mLastDisplayedStartPos;
     protected int mLastDisplayedEndPos;
     protected int mOffset;
     protected int mOffsetGoal;
-    protected int mFlingVelocity;
     protected int mPlayStartMsec;
     protected int mPlayStartOffset;
     protected int mPlayEndMsec;
     protected Handler mHandler;
     protected boolean mIsPlaying;
     protected MediaPlayer mPlayer;
-    protected boolean mTouchDragging;
-    protected float mTouchStart;
-    protected int mTouchInitialOffset;
-    protected int mTouchInitialStartPos;
-    protected int mTouchInitialEndPos;
-    protected long mWaveformTouchStartMsec;
     protected float mDensity;
-    protected int mMarkerLeftInset;
-    protected int mMarkerRightInset;
-    protected int mMarkerTopOffset;
-    protected int mMarkerBottomOffset;
 
     @Override
     public View onCreateView(LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
         super.onCreateView(inflater, container, savedInstanceState);
         View view = inflater.inflate(R.layout.fragment_waveform, container, false);
         loadGui(view);
-        if (mSoundFile == null) {
-            loadFromFile();
-        } else {
-            mHandler.post(() -> finishOpeningSoundFile());
-        }
         return view;
     }
 
@@ -121,13 +92,10 @@ public abstract class WaveformFragment extends Fragment implements MarkerView.Ma
         mPlayer = null;
         mIsPlaying = false;
 
-        mFilename = getFileName();
+        mFilename = null;
         mSoundFile = null;
-        mKeyDown = false;
 
         mHandler = new Handler();
-
-        mHandler.postDelayed(mTimerRunnable, 100);
     }
 
     @Override
@@ -153,184 +121,17 @@ public abstract class WaveformFragment extends Fragment implements MarkerView.Ma
      */
     public void waveformDraw() {
         mWidth = mWaveformView.getMeasuredWidth();
-        if (mOffsetGoal != mOffset && !mKeyDown)
+        if (mOffsetGoal != mOffset)
             updateDisplay();
         else if (mIsPlaying) {
             updateDisplay();
-        } else if (mFlingVelocity != 0) {
-            updateDisplay();
         }
     }
 
-    public void waveformTouchStart(float x) {
-        mTouchDragging = true;
-        mTouchStart = x;
-        mTouchInitialOffset = mOffset;
-        mFlingVelocity = 0;
-        mWaveformTouchStartMsec = System.currentTimeMillis();
-    }
-
-    public void waveformTouchMove(float x) {
-        mOffset = trap((int) (mTouchInitialOffset + (mTouchStart - x)));
-        updateDisplay();
-    }
-
-    public void waveformTouchEnd() {
-        mTouchDragging = false;
-        mOffsetGoal = mOffset;
-
-        long elapsedMsec = System.currentTimeMillis() - mWaveformTouchStartMsec;
-        if (elapsedMsec < 300) {
-            if (mIsPlaying) {
-                int seekMsec = mWaveformView.pixelsToMillisecs((int) (mTouchStart + mOffset));
-                if (seekMsec >= mPlayStartMsec && seekMsec < mPlayEndMsec) {
-                    mPlayer.seekTo(seekMsec - mPlayStartOffset);
-                } else {
-                    handlePause();
-                }
-            } else {
-                onPlay((int) (mTouchStart + mOffset));
-            }
+    public void waveformClick() {
+        if (mIsPlaying) {
+            handlePause();
         }
-    }
-
-    public void waveformFling(float vx) {
-        mTouchDragging = false;
-        mOffsetGoal = mOffset;
-        mFlingVelocity = (int) (-vx);
-        updateDisplay();
-    }
-
-    public void waveformZoomIn() {
-        mWaveformView.zoomIn();
-        mStartPos = mWaveformView.getStart();
-        mEndPos = mWaveformView.getEnd();
-        mMaxPos = mWaveformView.maxPos();
-        mOffset = mWaveformView.getOffset();
-        mOffsetGoal = mOffset;
-        enableZoomButtons();
-        updateDisplay();
-    }
-
-    public void waveformZoomOut() {
-        mWaveformView.zoomOut();
-        mStartPos = mWaveformView.getStart();
-        mEndPos = mWaveformView.getEnd();
-        mMaxPos = mWaveformView.maxPos();
-        mOffset = mWaveformView.getOffset();
-        mOffsetGoal = mOffset;
-        enableZoomButtons();
-        updateDisplay();
-    }
-
-    //
-    // MarkerListener
-    //
-
-    public void markerDraw() {
-    }
-
-    public void markerTouchStart(MarkerView marker, float x) {
-        mTouchDragging = true;
-        mTouchStart = x;
-        mTouchInitialStartPos = mStartPos;
-        mTouchInitialEndPos = mEndPos;
-    }
-
-    public void markerTouchMove(MarkerView marker, float x) {
-        float delta = x - mTouchStart;
-
-        if (marker == mStartMarker) {
-            mStartPos = trap((int) (mTouchInitialStartPos + delta));
-            mEndPos = trap((int) (mTouchInitialEndPos + delta));
-        } else {
-            mEndPos = trap((int) (mTouchInitialEndPos + delta));
-            if (mEndPos < mStartPos)
-                mEndPos = mStartPos;
-        }
-
-        updateDisplay();
-    }
-
-    public void markerTouchEnd(MarkerView marker) {
-        mTouchDragging = false;
-        if (marker == mStartMarker) {
-            setOffsetGoalStart();
-        } else {
-            setOffsetGoalEnd();
-        }
-    }
-
-    public void markerLeft(MarkerView marker, int velocity) {
-        mKeyDown = true;
-
-        if (marker == mStartMarker) {
-            int saveStart = mStartPos;
-            mStartPos = trap(mStartPos - velocity);
-            mEndPos = trap(mEndPos - (saveStart - mStartPos));
-            setOffsetGoalStart();
-        }
-
-        if (marker == mEndMarker) {
-            if (mEndPos == mStartPos) {
-                mStartPos = trap(mStartPos - velocity);
-                mEndPos = mStartPos;
-            } else {
-                mEndPos = trap(mEndPos - velocity);
-            }
-
-            setOffsetGoalEnd();
-        }
-
-        updateDisplay();
-    }
-
-    public void markerRight(MarkerView marker, int velocity) {
-        mKeyDown = true;
-
-        if (marker == mStartMarker) {
-            int saveStart = mStartPos;
-            mStartPos += velocity;
-            if (mStartPos > mMaxPos)
-                mStartPos = mMaxPos;
-            mEndPos += (mStartPos - saveStart);
-            if (mEndPos > mMaxPos)
-                mEndPos = mMaxPos;
-
-            setOffsetGoalStart();
-        }
-
-        if (marker == mEndMarker) {
-            mEndPos += velocity;
-            if (mEndPos > mMaxPos)
-                mEndPos = mMaxPos;
-
-            setOffsetGoalEnd();
-        }
-
-        updateDisplay();
-    }
-
-    public void markerEnter(MarkerView marker) {
-    }
-
-    public void markerKeyUp() {
-        mKeyDown = false;
-        updateDisplay();
-    }
-
-    public void markerFocus(MarkerView marker) {
-        mKeyDown = false;
-        if (marker == mStartMarker) {
-            setOffsetGoalStartNoUpdate();
-        } else {
-            setOffsetGoalEndNoUpdate();
-        }
-
-        // Delay updaing the display because if this focus was in
-        // response to a touch event, we want to receive the touch
-        // event too before updating the display.
-        mHandler.postDelayed(() -> updateDisplay(), 100);
     }
 
     //
@@ -342,36 +143,16 @@ public abstract class WaveformFragment extends Fragment implements MarkerView.Ma
         getActivity().getWindowManager().getDefaultDisplay().getMetrics(metrics);
         mDensity = metrics.density;
 
-        mMarkerLeftInset = (int) (46 * mDensity);
-        mMarkerRightInset = (int) (48 * mDensity);
-        mMarkerTopOffset = (int) (10 * mDensity);
-        mMarkerBottomOffset = (int) (10 * mDensity);
-
-        mStartText = (TextView) view.findViewById(R.id.starttext);
-        mStartText.addTextChangedListener(mTextWatcher);
-        mEndText = (TextView) view.findViewById(R.id.endtext);
-        mEndText.addTextChangedListener(mTextWatcher);
-
         mPlayButton = (ImageButton) view.findViewById(R.id.play);
         mPlayButton.setOnClickListener(mPlayListener);
-        mRewindButton = (ImageButton) view.findViewById(R.id.rew);
-        mRewindButton.setOnClickListener(getRewindListener());
-        mFfwdButton = (ImageButton) view.findViewById(R.id.ffwd);
-        mFfwdButton.setOnClickListener(getFwdListener());
-
-        TextView markStartButton = (TextView) view.findViewById(R.id.mark_start);
-        markStartButton.setOnClickListener(mMarkStartListener);
-        TextView markEndButton = (TextView) view.findViewById(R.id.mark_end);
-        markEndButton.setOnClickListener(mMarkEndListener);
 
         enableDisableButtons();
 
         mWaveformView = (WaveformView) view.findViewById(R.id.waveform);
         mWaveformView.setListener(this);
         mWaveformView.setSegments(getSegments());
-
-        mInfo = (TextView) view.findViewById(R.id.info);
-        mInfo.setText(mCaption);
+        mWaveformView.setPlaybackColor(getPlaybackColor());
+        mWaveformView.setSoundWaveColor(getSoundWaveColor());
 
         mMaxPos = 0;
         mLastDisplayedStartPos = -1;
@@ -382,20 +163,6 @@ public abstract class WaveformFragment extends Fragment implements MarkerView.Ma
             mWaveformView.recomputeHeights(mDensity);
             mMaxPos = mWaveformView.maxPos();
         }
-
-        mStartMarker = (MarkerView) view.findViewById(R.id.startmarker);
-        mStartMarker.setListener(this);
-        mStartMarker.setImageAlpha(255);
-        mStartMarker.setFocusable(true);
-        mStartMarker.setFocusableInTouchMode(true);
-        mStartVisible = true;
-
-        mEndMarker = (MarkerView) view.findViewById(R.id.endmarker);
-        mEndMarker.setListener(this);
-        mEndMarker.setImageAlpha(255);
-        mEndMarker.setFocusable(true);
-        mEndMarker.setFocusableInTouchMode(true);
-        mEndVisible = true;
 
         updateDisplay();
     }
@@ -444,7 +211,6 @@ public abstract class WaveformFragment extends Fragment implements MarkerView.Ma
                 } catch (final Exception e) {
                     Log.e(TAG, "Error while loading sound file", e);
                     mProgressDialog.dismiss();
-                    mInfo.setText(e.toString());
                     return;
                 }
                 if (mLoadingKeepGoing) {
@@ -462,20 +228,17 @@ public abstract class WaveformFragment extends Fragment implements MarkerView.Ma
         mLastDisplayedStartPos = -1;
         mLastDisplayedEndPos = -1;
 
-        mTouchDragging = false;
-
         mOffset = 0;
         mOffsetGoal = 0;
-        mFlingVelocity = 0;
         resetPositions();
 
         mCaption = mSoundFile.getFiletype() + ", " +
                 mSoundFile.getSampleRate() + " Hz, " +
                 mSoundFile.getAvgBitrateKbps() + " kbps, " +
                 formatTime(mMaxPos) + " " + getResources().getString(R.string.time_seconds);
-        mInfo.setText(mCaption);
         mProgressDialog.dismiss();
         updateDisplay();
+        onPlay(mStartPos);
     }
 
     protected synchronized void updateDisplay() {
@@ -489,128 +252,30 @@ public abstract class WaveformFragment extends Fragment implements MarkerView.Ma
             }
         }
 
-        if (!mTouchDragging) {
-            int offsetDelta;
+        int offsetDelta = mOffsetGoal - mOffset;
 
-            if (mFlingVelocity != 0) {
-                float saveVel = mFlingVelocity;
+        if (offsetDelta > 10)
+            offsetDelta = offsetDelta / 10;
+        else if (offsetDelta > 0)
+            offsetDelta = 1;
+        else if (offsetDelta < -10)
+            offsetDelta = offsetDelta / 10;
+        else if (offsetDelta < 0)
+            offsetDelta = -1;
+        else
+            offsetDelta = 0;
 
-                offsetDelta = mFlingVelocity / 30;
-                if (mFlingVelocity > 80) {
-                    mFlingVelocity -= 80;
-                } else if (mFlingVelocity < -80) {
-                    mFlingVelocity += 80;
-                } else {
-                    mFlingVelocity = 0;
-                }
+        mOffset += offsetDelta;
 
-                mOffset += offsetDelta;
-
-                if (mOffset + mWidth / 2 > mMaxPos) {
-                    mOffset = mMaxPos - mWidth / 2;
-                    mFlingVelocity = 0;
-                }
-                if (mOffset < 0) {
-                    mOffset = 0;
-                    mFlingVelocity = 0;
-                }
-                mOffsetGoal = mOffset;
-            } else {
-                offsetDelta = mOffsetGoal - mOffset;
-
-                if (offsetDelta > 10)
-                    offsetDelta = offsetDelta / 10;
-                else if (offsetDelta > 0)
-                    offsetDelta = 1;
-                else if (offsetDelta < -10)
-                    offsetDelta = offsetDelta / 10;
-                else if (offsetDelta < 0)
-                    offsetDelta = -1;
-                else
-                    offsetDelta = 0;
-
-                mOffset += offsetDelta;
-            }
-        }
-
-        mWaveformView.setParameters(mStartPos, mEndPos, mOffset);
         mWaveformView.invalidate();
-
-        mStartMarker.setContentDescription(getResources().getText(R.string.start_marker) + " " + formatTime(mStartPos));
-        mEndMarker.setContentDescription(getResources().getText(R.string.end_marker) + " " + formatTime(mEndPos));
-
-        int startX = mStartPos - mOffset - mMarkerLeftInset;
-        if (startX + mStartMarker.getWidth() >= 0) {
-            if (!mStartVisible) {
-                // Delay this to avoid flicker
-                mHandler.postDelayed(() -> {
-                    mStartVisible = true;
-                    mStartMarker.setImageAlpha(255);
-                }, 0);
-            }
-        } else {
-            if (mStartVisible) {
-                mStartMarker.setImageAlpha(0);
-                mStartVisible = false;
-            }
-            startX = 0;
-        }
-
-        int endX = mEndPos - mOffset - mEndMarker.getWidth() + mMarkerRightInset;
-        if (endX + mEndMarker.getWidth() >= 0) {
-            if (!mEndVisible) {
-                // Delay this to avoid flicker
-                mHandler.postDelayed(() -> {
-                    mEndVisible = true;
-                    mEndMarker.setImageAlpha(255);
-                }, 0);
-            }
-        } else {
-            if (mEndVisible) {
-                mEndMarker.setImageAlpha(0);
-                mEndVisible = false;
-            }
-            endX = 0;
-        }
-
-        mStartMarker.setLayoutParams(
-                new AbsoluteLayout.LayoutParams(
-                        AbsoluteLayout.LayoutParams.WRAP_CONTENT,
-                        AbsoluteLayout.LayoutParams.WRAP_CONTENT,
-                        startX, mMarkerTopOffset));
-
-        mEndMarker.setLayoutParams(
-                new AbsoluteLayout.LayoutParams(
-                        AbsoluteLayout.LayoutParams.WRAP_CONTENT,
-                        AbsoluteLayout.LayoutParams.WRAP_CONTENT,
-                        endX, mWaveformView.getMeasuredHeight() - mEndMarker.getHeight() - mMarkerBottomOffset));
     }
-
-    protected Runnable mTimerRunnable = new Runnable() {
-        public void run() {
-            // Updating an EditText is slow on Android.  Make sure
-            // we only do the update if the text has actually changed.
-            if (mStartPos != mLastDisplayedStartPos && !mStartText.hasFocus()) {
-                mStartText.setText(formatTime(mStartPos));
-                mLastDisplayedStartPos = mStartPos;
-            }
-
-            if (mEndPos != mLastDisplayedEndPos && !mEndText.hasFocus()) {
-                mEndText.setText(formatTime(mEndPos));
-                mLastDisplayedEndPos = mEndPos;
-            }
-
-            mHandler.postDelayed(mTimerRunnable, 100);
-        }
-    };
 
     protected void enableDisableButtons() {
         if (mIsPlaying) {
-            mPlayButton.setImageResource(android.R.drawable.ic_media_pause);
-            mPlayButton.setContentDescription(getResources().getText(R.string.stop));
+            mPlayButton.setVisibility(View.GONE);
         } else {
-            mPlayButton.setImageResource(android.R.drawable.ic_media_play);
-            mPlayButton.setContentDescription(getResources().getText(R.string.play));
+            mPlayButton.setVisibility(View.VISIBLE);
+            mPlayButton.setImageResource(getPlayButtonImageResource());
         }
     }
 
@@ -619,40 +284,7 @@ public abstract class WaveformFragment extends Fragment implements MarkerView.Ma
         mEndPos = mMaxPos;
     }
 
-    protected int trap(int pos) {
-        if (pos < 0)
-            return 0;
-        if (pos > mMaxPos)
-            return mMaxPos;
-        return pos;
-    }
-
-    protected void setOffsetGoalStart() {
-        setOffsetGoal(mStartPos - mWidth / 2);
-    }
-
-    protected void setOffsetGoalStartNoUpdate() {
-        setOffsetGoalNoUpdate(mStartPos - mWidth / 2);
-    }
-
-    protected void setOffsetGoalEnd() {
-        setOffsetGoal(mEndPos - mWidth / 2);
-    }
-
-    protected void setOffsetGoalEndNoUpdate() {
-        setOffsetGoalNoUpdate(mEndPos - mWidth / 2);
-    }
-
-    protected void setOffsetGoal(int offset) {
-        setOffsetGoalNoUpdate(offset);
-        updateDisplay();
-    }
-
     protected void setOffsetGoalNoUpdate(int offset) {
-        if (mTouchDragging) {
-            return;
-        }
-
         mOffsetGoal = offset;
         if (mOffsetGoal + mWidth / 2 > mMaxPos)
             mOffsetGoal = mMaxPos - mWidth / 2;
@@ -690,7 +322,6 @@ public abstract class WaveformFragment extends Fragment implements MarkerView.Ma
         if (mPlayer != null && mPlayer.isPlaying()) {
             mPlayer.pause();
         }
-        mWaveformView.setPlayback(-1);
         mIsPlaying = false;
         enableDisableButtons();
     }
@@ -701,9 +332,10 @@ public abstract class WaveformFragment extends Fragment implements MarkerView.Ma
             return;
         }
 
-        if (mPlayer == null) {
-            // Not initialized yet
-            return;
+        //sound file is not loaded yet
+        if (mSoundFile == null) {
+            mFilename = getFileName();
+            loadFromFile();
         }
 
         try {
@@ -727,7 +359,7 @@ public abstract class WaveformFragment extends Fragment implements MarkerView.Ma
                     mPlayer.reset();
                     mPlayer.setAudioStreamType(AudioManager.STREAM_MUSIC);
                     FileInputStream subsetInputStream = new FileInputStream(mFile.getAbsolutePath());
-                    mPlayer.setDataSource(subsetInputStream.getFD(),startByte, endByte - startByte);
+                    mPlayer.setDataSource(subsetInputStream.getFD(), startByte, endByte - startByte);
                     mPlayer.prepare();
                     mPlayStartOffset = mPlayStartMsec;
                 } catch (Exception e) {
@@ -743,9 +375,6 @@ public abstract class WaveformFragment extends Fragment implements MarkerView.Ma
             mPlayer.setOnCompletionListener((MediaPlayer mediaPlayer) -> handlePause());
             mIsPlaying = true;
 
-            if (mPlayStartOffset == 0) {
-                mPlayer.seekTo(mPlayStartMsec);
-            }
             mPlayer.start();
             updateDisplay();
             enableDisableButtons();
@@ -754,88 +383,9 @@ public abstract class WaveformFragment extends Fragment implements MarkerView.Ma
         }
     }
 
-    protected void enableZoomButtons() {
-    }
-
     protected OnClickListener mPlayListener = new OnClickListener() {
         public void onClick(View sender) {
             onPlay(mStartPos);
-        }
-    };
-
-    protected OnClickListener mRewindListener = new OnClickListener() {
-        public void onClick(View sender) {
-            if (mIsPlaying) {
-                int newPos = mPlayer.getCurrentPosition() - 5000;
-                if (newPos < mPlayStartMsec)
-                    newPos = mPlayStartMsec;
-                mPlayer.seekTo(newPos);
-            } else {
-                mStartPos = trap(mStartPos - mWaveformView.secondsToPixels(getStep()));
-                updateDisplay();
-                mStartMarker.requestFocus();
-                markerFocus(mStartMarker);
-            }
-        }
-    };
-
-    protected OnClickListener mFfwdListener = new OnClickListener() {
-        public void onClick(View sender) {
-            if (mIsPlaying) {
-                int newPos = 5000 + mPlayer.getCurrentPosition();
-                if (newPos > mPlayEndMsec)
-                    newPos = mPlayEndMsec;
-                mPlayer.seekTo(newPos);
-            } else {
-                mStartPos = trap(mStartPos + mWaveformView.secondsToPixels(getStep()));
-                updateDisplay();
-                mStartMarker.requestFocus();
-                markerFocus(mStartMarker);
-            }
-        }
-    };
-
-    protected OnClickListener mMarkStartListener = new OnClickListener() {
-        public void onClick(View sender) {
-            if (mIsPlaying) {
-                mStartPos = mWaveformView.millisecsToPixels(mPlayer.getCurrentPosition() + mPlayStartOffset);
-                updateDisplay();
-            }
-        }
-    };
-
-    protected OnClickListener mMarkEndListener = new OnClickListener() {
-        public void onClick(View sender) {
-            if (mIsPlaying) {
-                mEndPos = mWaveformView.millisecsToPixels(mPlayer.getCurrentPosition() + mPlayStartOffset);
-                updateDisplay();
-                handlePause();
-            }
-        }
-    };
-
-    protected TextWatcher mTextWatcher = new TextWatcher() {
-        public void beforeTextChanged(CharSequence s, int start, int count, int after) {
-        }
-
-        public void onTextChanged(CharSequence s, int start, int before, int count) {
-        }
-
-        public void afterTextChanged(Editable s) {
-            if (mStartText.hasFocus()) {
-                try {
-                    mStartPos = mWaveformView.secondsToPixels(Double.parseDouble(mStartText.getText().toString()));
-                    updateDisplay();
-                } catch (NumberFormatException e) {
-                }
-            }
-            if (mEndText.hasFocus()) {
-                try {
-                    mEndPos = mWaveformView.secondsToPixels(Double.parseDouble(mEndText.getText().toString()));
-                    updateDisplay();
-                } catch (NumberFormatException e) {
-                }
-            }
         }
     };
 
@@ -845,23 +395,24 @@ public abstract class WaveformFragment extends Fragment implements MarkerView.Ma
         return null;
     }
 
-    protected OnClickListener getFwdListener() {
-        return mFfwdListener;
+    /**
+     * Get color of playback line. Override it for customizing
+     */
+    protected int getPlaybackColor() {
+        return getResources().getColor(R.color.playback_indicator);
     }
 
-    protected OnClickListener getRewindListener() {
-        return mRewindListener;
+    /**
+     * Get color of sound wave. Override it for customizing
+     */
+    protected int getSoundWaveColor() {
+        return getResources().getColor(R.color.waveform_selected);
     }
 
-    protected int getStep() {
-        int maxSeconds = (int) mWaveformView.pixelsToSeconds(mWaveformView.maxPos());
-        if (maxSeconds / 3600 > 0) {
-            return 600;
-        } else if (maxSeconds / 1800 > 0) {
-            return 300;
-        } else if (maxSeconds / 300 > 0) {
-            return 60;
-        }
-        return 5;
+    /**
+     * Get resource for play button. Override it for customizing
+     */
+    protected int getPlayButtonImageResource() {
+        return android.R.drawable.ic_media_play;
     }
 }

@@ -16,6 +16,6 @@
         android:layout_gravity="center"
         android:background="@android:color/transparent"
         android:contentDescription="@string/play"
-        android:src="@drawable/play" />
+        android:src="@android:drawable/ic_media_play" />
 
 </FrameLayout>

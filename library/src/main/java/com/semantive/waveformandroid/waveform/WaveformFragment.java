@@ -75,7 +75,6 @@ public abstract class WaveformFragment extends Fragment implements WaveformView.
     protected boolean mIsPlaying;
     protected MediaPlayer mPlayer;
     protected float mDensity;
-    protected boolean okLoad = false;
 
     @Override
     public View onCreateView(LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
@@ -276,8 +275,7 @@ public abstract class WaveformFragment extends Fragment implements WaveformView.
             mPlayButton.setVisibility(View.GONE);
         } else {
             mPlayButton.setVisibility(View.VISIBLE);
-            mPlayButton.setImageResource(R.drawable.play);
-            mPlayButton.setContentDescription(getResources().getText(R.string.play));
+            mPlayButton.setImageResource(getPlayButtonImageResource());
         }
     }
 
@@ -409,5 +407,12 @@ public abstract class WaveformFragment extends Fragment implements WaveformView.
      */
     protected int getSoundWaveColor() {
         return getResources().getColor(R.color.waveform_selected);
+    }
+
+    /**
+     * Get resource for play button. Override it for customizing
+     */
+    protected int getPlayButtonImageResource() {
+        return android.R.drawable.ic_media_play;
     }
 }
